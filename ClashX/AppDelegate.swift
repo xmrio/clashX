@@ -687,6 +687,7 @@ extension AppDelegate {
     @IBAction func actionUpdateProxyGroupMenu(_ sender: Any) {
         ConfigManager.shared.disableShowCurrentProxyInMenu = !ConfigManager.shared.disableShowCurrentProxyInMenu
         updateExperimentalFeatureStatus()
+        MenuItemFactory.recreateProxyMenuItems()
     }
 
     @IBAction func actionSetBenchmarkUrl(_ sender: Any) {
@@ -719,8 +720,8 @@ extension AppDelegate {
         #else
             FirebaseApp.configure()
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                MSAppCenter.start("dce6e9a3-b6e3-4fd2-9f2d-35c767a99663", withServices: [
-                    MSAnalytics.self,
+                AppCenter.start(withAppSecret: "dce6e9a3-b6e3-4fd2-9f2d-35c767a99663", services: [
+                    Analytics.self,
                 ])
             }
 
@@ -806,6 +807,14 @@ extension AppDelegate {
             self?.syncConfig()
         }
     }
+
+    func hasMenuSelected() -> Bool {
+        if #available(macOS 11, *) {
+            return statusMenu.items.contains { $0.state == .on }
+        } else {
+            return true
+        }
+    }
 }
 
 // MARK: NSMenuDelegate
@@ -815,6 +824,9 @@ extension AppDelegate: NSMenuDelegate {
         MenuItemFactory.refreshExistingMenuItems()
         updateConfigFiles()
         syncConfig()
+        NotificationCenter.default.post(name: .proxyMeneViewShowLeftPadding,
+                                        object: nil,
+                                        userInfo: ["show": hasMenuSelected()])
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -839,9 +851,9 @@ extension AppDelegate {
         }
 
         guard let components = URLComponents(string: url),
-            let scheme = components.scheme,
-            scheme.hasPrefix("clash"),
-            let host = components.host
+              let scheme = components.scheme,
+              scheme.hasPrefix("clash"),
+              let host = components.host
         else { return }
 
         if host == "install-config" {
