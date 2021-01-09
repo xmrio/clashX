@@ -17,7 +17,7 @@ import AppCenterAnalytics
 import Firebase
 
 
-private let statusItemLengthWithSpeed: CGFloat = 70
+private let statusItemLengthWithSpeed: CGFloat = 72
 
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -73,8 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemView = StatusItemView.create(statusItem: statusItem)
         statusItemView.frame = CGRect(x: 0, y: 0, width: statusItemLengthWithSpeed, height: 22)
         statusMenu.delegate = self
-        setupStatusMenuItemData()
-        AppVersionUtil.showUpgradeAlert()
+        startAnrDetect()
         DispatchQueue.main.async {
             self.postFinishLaunching()
         }
@@ -84,6 +83,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         defer {
             statusItem.menu = statusMenu
         }
+        setupStatusMenuItemData()
+        AppVersionUtil.showUpgradeAlert()
         iCloudManager.shared.setup()
         setupExperimentalMenuItem()
 
@@ -98,7 +99,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         removeUnExistProxyGroups()
 
         // start proxy
+        Logger.log("initClashCore")
         initClashCore()
+        Logger.log("initClashCore finish")
         setupData()
         runAfterConfigReload = { [weak self] in
             if !ConfigManager.builtInApiMode {
@@ -272,11 +275,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PrivilegedHelperManager.shared.isHelperCheckFinished
                 .filter({$0})
                 .take(1)
-                .takeWhile{_ in ConfigManager.shared.proxyPortAutoSet}
-                .observeOn(MainScheduler.instance)
-                .subscribe { _ in
+                .take(while:{_ in ConfigManager.shared.proxyPortAutoSet})
+                .observe(on: MainScheduler.instance)
+                .bind(onNext: { _ in
                     SystemProxyManager.shared.enableProxy()
-                }.disposed(by: disposeBag)
+                }).disposed(by: disposeBag)
+        } else if ConfigManager.shared.proxyPortAutoSet {
+            SystemProxyManager.shared.enableProxy()
         }
         
         if !PrivilegedHelperManager.shared.isHelperCheckFinished.value {
@@ -284,7 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PrivilegedHelperManager.shared.isHelperCheckFinished
                 .filter({$0})
                 .take(1)
-                .observeOn(MainScheduler.instance)
+                .observe(on: MainScheduler.instance)
                 .subscribe { [weak self] _ in
                     guard let self = self else { return }
                     self.proxySettingMenuItem.target = self
@@ -299,7 +304,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .default
             .rx
             .notification(.systemNetworkStatusDidChange)
-            .observeOn(MainScheduler.instance)
+            .observe(on: MainScheduler.instance)
             .delay(.milliseconds(200), scheduler: MainScheduler.instance)
             .bind { _ in
                 guard NetworkChangeNotifier.getPrimaryInterface() != nil else { return }
@@ -326,7 +331,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .distinctUntilChanged()
             .skip(1)
             .filter { $0 != nil }
-            .observeOn(MainScheduler.instance)
+            .observe(on: MainScheduler.instance)
             .debounce(.seconds(5), scheduler: MainScheduler.instance).bind { [weak self] _ in
                 self?.healthHeckOnNetworkChange()
             }.disposed(by: disposeBag)
@@ -417,6 +422,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             proxyModeMenuItem.isEnabled = false
             NSUserNotificationCenter.default.postConfigErrorNotice(msg: string)
         }
+        Logger.log("Start proxy done")
     }
 
     func syncConfig(completeHandler: (() -> Void)? = nil) {
@@ -771,6 +777,17 @@ extension AppDelegate {
             DispatchQueue.global().asyncAfter(deadline: DispatchTime.now() + Double(Int64(5 * Double(NSEC_PER_SEC))) / Double(NSEC_PER_SEC), execute: {
                 x.set(0, forKey: "launch_fail_times")
             })
+        #endif
+    }
+}
+
+// MARK: ANR
+extension AppDelegate {
+    private func startAnrDetect() {
+        #if DEBUG
+        return
+        #else
+        AnrDetectUtil.shared.start()
         #endif
     }
 }
